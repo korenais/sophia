@@ -1,0 +1,17 @@
+.DS_Store
+
+# Local environment and secrets
+infra/.env
+*.env
+
+# Local database dumps and backups
+backups/*.sql
+backups/*.sql.gz
+
+# Node / build artifacts
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local runtime files
+.colima/

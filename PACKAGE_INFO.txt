@@ -1,0 +1,27 @@
+﻿Sophia Bot - Production Deployment Package (Linux)
+==================================================
+
+Package Created: 2025-12-26 15:24:48
+Version: Latest
+Target: Linux Production Server
+
+Contents:
+- Infrastructure (Docker Compose configuration)
+- Services (Bot, API, Frontend, Database migrations)
+- Deployment scripts (with backup and migration support)
+- Documentation
+
+Deployment Instructions (Linux Production Server):
+1. Transfer deploy.zip to your Linux server (scp, sftp, etc.)
+2. SSH into your Linux server
+3. Extract: unzip deploy.zip
+4. Configure: cp infra/env.sample.txt infra/.env && nano infra/.env
+5. Deploy: chmod +x deploy_production.sh && ./deploy_production.sh
+
+The deploy_production.sh script automatically:
+- Creates database backup before deployment
+- Applies safe database migrations (no data loss)
+- Deploys all services with Docker Compose
+- Verifies deployment success
+
+For detailed instructions, see DEPLOYMENT_PRODUCTION.md

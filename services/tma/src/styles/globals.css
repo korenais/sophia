@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-theme-bg-color: #1A1C24;
+  --tg-theme-text-color: #EDE9E3;
+  --tg-theme-hint-color: #7A8099;
+  --tg-theme-link-color: #C9A84C;
+  --tg-theme-button-color: #C9A84C;
+  --tg-theme-button-text-color: #1A1C24;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background-color: #1A1C24;
+  color: #EDE9E3;
+  font-family: 'Jost', system-ui, sans-serif;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* Gold shimmer animation */
+@keyframes gold-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.3); }
+  50%       { box-shadow: 0 0 0 8px rgba(201, 168, 76, 0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease both;
+}
+
+.gold-text {
+  background: linear-gradient(90deg, #C9A84C, #E8C96B, #C9A84C);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gold-shimmer 3s linear infinite;
+}
+
+.gold-border {
+  border-image: linear-gradient(135deg, #C9A84C, #E8C96B, #C9A84C) 1;
+}
+
+/* Scrollable content areas */
+.scroll-area {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+.scroll-area::-webkit-scrollbar {
+  display: none;
+}
+
+/* Card press effect */
+.card-press {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+.card-press:active {
+  transform: scale(0.985);
+  opacity: 0.85;
+}
+
+/* Gold divider */
+.gold-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201,168,76,0.4), transparent);
+}
+
+/* Ornamental corner */
+.ornament {
+  font-size: 10px;
+  color: rgba(201,168,76,0.5);
+  letter-spacing: 2px;
+}
+
+/* Bottom navigation safe area */
+.nav-safe {
+  padding-bottom: calc(8px + var(--safe-area-bottom));
+}
