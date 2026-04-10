@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Avatar from './Avatar'
 import { api, Member } from '../lib/api'
 import { getTelegramUser, hapticImpact } from '../lib/telegram'
-import logoHorizontal from '../assets/logo-horizontal.png'
+import logoVertical from '../assets/logo-vertical.png'
 import { HOME_ROUTE } from '../lib/routes'
 
 export default function TopBar() {
@@ -44,7 +44,7 @@ export default function TopBar() {
           className="min-w-0 flex-1 px-1 text-center transition-opacity active:opacity-80"
           aria-label="Go to home"
         >
-          <p className="truncate font-display text-[19px] font-light tracking-[0.02em] text-cream sm:text-[22px]">
+          <p className="truncate font-display text-[18px] font-light uppercase tracking-[0.12em] text-gold sm:text-[20px]">
             Baltic Business Club
           </p>
         </button>
@@ -52,13 +52,13 @@ export default function TopBar() {
         <button
           type="button"
           onClick={goHome}
-          className="flex w-16 flex-shrink-0 justify-end transition-opacity active:opacity-80 sm:w-20"
+          className="flex w-12 flex-shrink-0 justify-end self-start pt-0.5 transition-opacity active:opacity-80 sm:w-14"
           aria-label="Go to home"
         >
           <img
-            src={logoHorizontal}
+            src={logoVertical}
             alt="Baltic Business Club"
-            className="h-6 w-auto select-none opacity-95 sm:h-7"
+            className="h-11 w-auto -translate-y-0.5 select-none opacity-95 sm:h-12"
           />
         </button>
       </div>
