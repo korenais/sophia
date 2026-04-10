@@ -1,4 +1,12 @@
-export default function LoadingScreen() {
+interface LoadingScreenProps {
+  title?: string
+  subtitle?: string
+}
+
+export default function LoadingScreen({
+  title = 'Baltic Business Club',
+  subtitle = 'загрузка...',
+}: LoadingScreenProps) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 bg-bg animate-fade-in">
       {/* Shield ornament */}
@@ -32,9 +40,9 @@ export default function LoadingScreen() {
 
       <div className="text-center">
         <p className="font-display text-xl text-gold font-light tracking-widest uppercase">
-          Baltic Business Club
+          {title}
         </p>
-        <p className="text-muted text-xs font-body tracking-wider mt-1">загрузка...</p>
+        <p className="text-muted text-xs font-body tracking-wider mt-1">{subtitle}</p>
       </div>
     </div>
   )

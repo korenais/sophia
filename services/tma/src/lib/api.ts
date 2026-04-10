@@ -1,6 +1,6 @@
 import { getInitData } from './telegram'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8055'
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 async function request<T>(
   path: string,
@@ -83,6 +83,7 @@ export const api = {
 
   // Match / meeting
   getPendingMatch: () => request<Meeting | null>('/tma/matches/pending'),
+  findMatch: () => request<Meeting | null>('/tma/matches/find', { method: 'POST' }),
   getMeeting: (meetingId: number) => request<Meeting>(`/tma/meetings/${meetingId}`),
   confirmMeeting: (meetingId: number) =>
     request<void>(`/tma/meetings/${meetingId}/confirm`, { method: 'POST' }),

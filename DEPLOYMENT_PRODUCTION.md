@@ -434,6 +434,184 @@ For issues:
 - [ ] API health check passing
 - [ ] Logs checked for errors
 
+## 📱 TMA Side-by-Side Rollout
+
+Use this path when you want to deploy Telegram Mini App safely without restarting the old bot or replacing the old API behavior.
+
+### Principles
+
+- Keep the existing `infra_bot_1`, `infra_api_1`, `infra_frontend_1`, and `infra_db_1`
+- Use the same production database
+- Add only additive DB columns for TMA
+- Run TMA through a compose override, not through a full in-place redeploy
+
+### Required Production Env
+
+Add these lines to `infra/.env`:
+
+```env
+TMA_URL=https://vm18.digisoov.ee/tma/
+TMA_VITE_API_BASE_URL=/tma-api
+TMA_VITE_APP_BASE_PATH=/tma/
+TMA_CORS_ALLOWED_ORIGINS=https://vm18.digisoov.ee
+TMA_ALLOWED_USER_IDS=6461565453,423138096
+```
+
+Notes:
+- `TMA_ALLOWED_USER_IDS` is optional but recommended for private rollout
+- it limits Mini App access without affecting the old bot
+- current test users are `6461565453` and `423138096`
+
+### Files Required
+
+- `infra/docker-compose.tma.yml`
+- `services/tma/*`
+- updated `services/api/main.py`
+- updated `services/frontend/nginx.conf`
+- `services/db/add_tma_columns.sql`
+
+### Deployment Steps
+
+1. Create a fresh DB backup:
+
+```bash
+cd /home/aanisimov/sophia
+bash ./backup_database_production.sh
+```
+
+2. Apply additive TMA migration:
+
+```bash
+cd /home/aanisimov/sophia
+docker exec -i infra_db_1 psql -U postgres -d postgres < services/db/add_tma_columns.sql
+```
+
+3. Start the rollout services:
+
+```bash
+cd /home/aanisimov/sophia/infra
+docker-compose -f docker-compose.yml -f docker-compose.tma.yml up --build -d frontend api-tma tma
+```
+
+What this does:
+- rebuilds `frontend` so it proxies `/tma` and `/tma-api`
+- starts `api-tma` as a separate API container using the same DB
+- starts `tma` as the Mini App frontend
+- does not restart the bot
+
+### Production Server Reality
+
+On the current production server (`vm18.digisoov.ee`), `docker-compose` v1 has a known recreate bug:
+
+- error: `KeyError: 'ContainerConfig'`
+- it can appear when recreating existing services such as `db` or `frontend`
+
+Because of that, the safest practical rollout path is:
+
+1. Start only new sidecars with `--no-deps`
+2. Recreate `frontend` separately, also with `--no-deps`
+3. If `frontend` recreate fails with the same bug, remove the old container and create it again
+
+### Recommended Real-World Commands
+
+Start TMA sidecars only:
+
+```bash
+cd /home/aanisimov/sophia/infra
+docker-compose -f docker-compose.yml -f docker-compose.tma.yml up --build -d --no-deps api-tma tma
+```
+
+Recreate frontend ingress safely:
+
+```bash
+cd /home/aanisimov/sophia/infra
+docker-compose -f docker-compose.yml -f docker-compose.tma.yml up --build -d --no-deps frontend
+```
+
+If frontend hits `ContainerConfig`, recover with:
+
+```bash
+docker rm -f infra_frontend_1
+cd /home/aanisimov/sophia/infra
+docker-compose -f docker-compose.yml -f docker-compose.tma.yml up --build -d --no-deps frontend
+```
+
+### TMA Routing Fix
+
+The frontend nginx config must use `^~` for TMA routes, otherwise `/tma/assets/*.js` and `/tma/assets/*.css` may be intercepted by the generic static-assets rule and return `404`.
+
+Required locations in `services/frontend/nginx.conf`:
+
+```nginx
+location ^~ /tma-api/ {
+    proxy_pass http://api-tma:8055/;
+}
+
+location ^~ /tma/ {
+    proxy_pass http://tma/;
+}
+```
+
+Without this, Telegram may show a blank white window because the HTML loads but the JS/CSS bundles fail.
+
+### Verification
+
+```bash
+curl https://vm18.digisoov.ee/tma/
+curl https://vm18.digisoov.ee/tma-api/health
+curl -I https://vm18.digisoov.ee/tma/assets/index-*.js
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+Expected:
+- `/tma/` returns `200`
+- `/tma-api/health` returns healthy JSON
+- `/tma/assets/...` returns `200`, not `404`
+
+### Access Control
+
+During private rollout, keep TMA limited to explicit Telegram users:
+
+```env
+TMA_ALLOWED_USER_IDS=6461565453,423138096
+```
+
+This restriction is enforced in `services/api/main.py` and applies only to TMA endpoints.
+The old bot behavior is unchanged.
+
+### Recovery If DB Gets Stopped
+
+If compose v1 touches the DB and the old container stops, but the named volume is still present:
+
+1. Check that `infra_db_data` still exists
+2. Start the stopped DB container again
+3. Verify with `pg_isready`
+
+Example:
+
+```bash
+docker volume ls
+docker start <stopped-db-container>
+docker exec <stopped-db-container> pg_isready -U postgres -d postgres
+```
+
+This restores the old production state without restoring from backup, because the data lives in the Docker volume.
+
+### Rollback
+
+```bash
+cd /home/aanisimov/sophia/infra
+docker-compose -f docker-compose.yml -f docker-compose.tma.yml stop api-tma tma
+docker-compose -f docker-compose.yml -f docker-compose.tma.yml rm -f api-tma tma
+docker-compose -f docker-compose.yml up --build -d frontend
+```
+
+Rollback impact:
+- old bot keeps running
+- old API keeps running
+- old database stays in place
+- only TMA entrypoints disappear
+
 ---
 
 **Last Updated:** $(date)

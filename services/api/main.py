@@ -1,17 +1,23 @@
 import os
 import asyncpg
 import httpx
+import math
 from fastapi import FastAPI, HTTPException, Depends, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 import re
 
 DB_URL = os.getenv("DB_URL", "postgresql://postgres:postgres@db:5432/postgres")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DEV_TMA_BYPASS = os.getenv("DEV_TMA_BYPASS", "").lower() in {"1", "true", "yes"}
 DEV_TMA_USER_ID = int(os.getenv("DEV_TMA_USER_ID", "999000001"))
+TMA_ALLOWED_USER_IDS = {
+    int(user_id.strip())
+    for user_id in os.getenv("TMA_ALLOWED_USER_IDS", "").split(",")
+    if user_id.strip().isdigit()
+}
 
 app = FastAPI(title="Sophia API")
 
@@ -2259,6 +2265,8 @@ async def _get_tma_user(x_telegram_init_data: str = Header(default="")) -> dict:
     user = _validate_tma_init_data(x_telegram_init_data)
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid Telegram init data")
+    if TMA_ALLOWED_USER_IDS and int(user.get("id", 0)) not in TMA_ALLOWED_USER_IDS:
+        raise HTTPException(status_code=403, detail="TMA access is not enabled for this user")
     return user
 
 
@@ -2280,6 +2288,209 @@ def _member_row_to_dict(row: dict) -> dict:
     d.setdefault("offer", None)
     d.setdefault("request_text", None)
     return d
+
+
+def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot / (norm1 * norm2)
+
+
+def _normalize_vector(raw: Any) -> Optional[List[float]]:
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        try:
+            return [float(v) for v in raw]
+        except (TypeError, ValueError):
+            return None
+    if isinstance(raw, tuple):
+        try:
+            return [float(v) for v in raw]
+        except (TypeError, ValueError):
+            return None
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("{") and text.endswith("}"):
+            parts = [part.strip() for part in text[1:-1].split(",") if part.strip()]
+            try:
+                return [float(v) for v in parts]
+            except ValueError:
+                return None
+    return None
+
+
+async def _get_pending_meeting_id(conn: asyncpg.Connection, user_id: int) -> Optional[int]:
+    return await conn.fetchval(
+        """
+        SELECT m.id
+        FROM public.meetings m
+        WHERE (m.user_1_id = $1 OR m.user_2_id = $1)
+          AND m.status = 'new'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.meetings newer
+              WHERE LEAST(newer.user_1_id, newer.user_2_id) = LEAST(m.user_1_id, m.user_2_id)
+                AND GREATEST(newer.user_1_id, newer.user_2_id) = GREATEST(m.user_1_id, m.user_2_id)
+                AND newer.id > m.id
+          )
+        ORDER BY m.created_at DESC
+        LIMIT 1
+        """,
+        user_id,
+    )
+
+
+async def _get_matchable_user_row(conn: asyncpg.Connection, user_id: int) -> Optional[dict]:
+    row = await conn.fetchrow(
+        """
+        SELECT user_id, vector_description
+        FROM public.users
+        WHERE user_id = $1
+          AND finishedonboarding = true
+          AND state = 'ACTIVE'
+          AND vector_description IS NOT NULL
+          AND intro_description IS NOT NULL
+          AND length(trim(intro_description)) >= 10
+          AND (matches_disabled IS NULL OR matches_disabled = false)
+        """,
+        user_id,
+    )
+    return dict(row) if row else None
+
+
+async def _has_block_between(conn: asyncpg.Connection, user_id: int, other_user_id: int) -> bool:
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+        FROM public.match_blocks
+        WHERE (user_id = $1 AND blocked_user_id = $2)
+           OR (user_id = $2 AND blocked_user_id = $1)
+        LIMIT 1
+        """,
+        user_id,
+        other_user_id,
+    )
+    return row is not None
+
+
+async def _has_recent_met_meeting(
+    conn: asyncpg.Connection,
+    user_id: int,
+    other_user_id: int,
+    months: int = 6,
+) -> bool:
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+        FROM public.meetings
+        WHERE ((user_1_id = $1 AND user_2_id = $2) OR (user_1_id = $2 AND user_2_id = $1))
+          AND status = 'met'
+          AND last_updated >= NOW() - (INTERVAL '1 month' * $3)
+        LIMIT 1
+        """,
+        user_id,
+        other_user_id,
+        months,
+    )
+    return row is not None
+
+
+async def _has_already_known_meeting(
+    conn: asyncpg.Connection,
+    user_id: int,
+    other_user_id: int,
+) -> bool:
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+        FROM public.meetings
+        WHERE ((user_1_id = $1 AND user_2_id = $2) OR (user_1_id = $2 AND user_2_id = $1))
+          AND already_known = true
+        LIMIT 1
+        """,
+        user_id,
+        other_user_id,
+    )
+    return row is not None
+
+
+async def _candidate_has_pending_meeting(conn: asyncpg.Connection, user_id: int) -> bool:
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+        FROM public.meetings
+        WHERE (user_1_id = $1 OR user_2_id = $1) AND status = 'new'
+        LIMIT 1
+        """,
+        user_id,
+    )
+    return row is not None
+
+
+async def _find_best_match_for_user(
+    conn: asyncpg.Connection,
+    user_id: int,
+    min_similarity_threshold: float = 0.3,
+) -> Optional[int]:
+    me = await _get_matchable_user_row(conn, user_id)
+    if not me:
+        raise HTTPException(
+            status_code=400,
+            detail="Complete your profile to use Match",
+        )
+
+    my_vector = _normalize_vector(me.get("vector_description"))
+    if not my_vector:
+        raise HTTPException(
+            status_code=400,
+            detail="Complete your profile to use Match",
+        )
+
+    candidates = await conn.fetch(
+        """
+        SELECT user_id, vector_description
+        FROM public.users
+        WHERE user_id != $1
+          AND finishedonboarding = true
+          AND state = 'ACTIVE'
+          AND vector_description IS NOT NULL
+          AND intro_description IS NOT NULL
+          AND length(trim(intro_description)) >= 10
+          AND (matches_disabled IS NULL OR matches_disabled = false)
+        """,
+        user_id,
+    )
+
+    best_user_id: Optional[int] = None
+    best_score = -1.0
+
+    for candidate_row in candidates:
+        candidate = dict(candidate_row)
+        candidate_id = int(candidate["user_id"])
+
+        if await _candidate_has_pending_meeting(conn, candidate_id):
+            continue
+        if await _has_block_between(conn, user_id, candidate_id):
+            continue
+        if await _has_recent_met_meeting(conn, user_id, candidate_id, months=6):
+            continue
+        if await _has_already_known_meeting(conn, user_id, candidate_id):
+            continue
+
+        candidate_vector = _normalize_vector(candidate.get("vector_description"))
+        if not candidate_vector:
+            continue
+
+        similarity = _cosine_similarity(my_vector, candidate_vector)
+        if similarity >= min_similarity_threshold and similarity > best_score:
+            best_score = similarity
+            best_user_id = candidate_id
+
+    return best_user_id
 
 
 # ── Photo proxy ───────────────────────────────────────────────────────────────
@@ -2485,17 +2696,54 @@ async def tma_pending_match(tg_user: dict = Depends(_get_tma_user)):
         raise HTTPException(status_code=503, detail="DB not ready")
     user_id = tg_user.get("id")
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id FROM public.meetings
-            WHERE (user_1_id = $1 OR user_2_id = $1) AND status = 'new'
-            ORDER BY created_at DESC LIMIT 1
-            """,
-            user_id,
-        )
-        if not row:
+        meeting_id = await _get_pending_meeting_id(conn, user_id)
+        if not meeting_id:
             return None
-        return await _get_meeting_with_matched_user(conn, row["id"], user_id)
+        return await _get_meeting_with_matched_user(conn, meeting_id, user_id)
+
+
+@app.post("/tma/matches/find")
+async def tma_find_match(tg_user: dict = Depends(_get_tma_user)):
+    if not pool:
+        raise HTTPException(status_code=503, detail="DB not ready")
+
+    user_id = int(tg_user.get("id"))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            lock_ids = sorted([user_id])
+            for lock_id in lock_ids:
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", lock_id)
+
+            existing_meeting_id = await _get_pending_meeting_id(conn, user_id)
+            if existing_meeting_id:
+                return await _get_meeting_with_matched_user(conn, existing_meeting_id, user_id)
+
+            matched_user_id = await _find_best_match_for_user(conn, user_id)
+            if matched_user_id is None:
+                return None
+
+            if matched_user_id != user_id:
+                for lock_id in sorted([user_id, matched_user_id]):
+                    await conn.execute("SELECT pg_advisory_xact_lock($1)", lock_id)
+
+            existing_meeting_id = await _get_pending_meeting_id(conn, user_id)
+            if existing_meeting_id:
+                return await _get_meeting_with_matched_user(conn, existing_meeting_id, user_id)
+
+            if await _candidate_has_pending_meeting(conn, matched_user_id):
+                return None
+
+            meeting_id = await conn.fetchval(
+                """
+                INSERT INTO public.meetings(user_1_id, user_2_id, status, created_at, last_updated)
+                VALUES($1, $2, 'new', now(), now())
+                RETURNING id
+                """,
+                user_id,
+                matched_user_id,
+            )
+
+            return await _get_meeting_with_matched_user(conn, int(meeting_id), user_id)
 
 
 @app.get("/tma/meetings/{meeting_id}")
@@ -2515,9 +2763,21 @@ async def tma_confirm_meeting(meeting_id: int, tg_user: dict = Depends(_get_tma_
     if not pool:
         raise HTTPException(status_code=503, detail="DB not ready")
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE public.meetings SET status='met', last_updated=now() WHERE id=$1",
+        pair = await conn.fetchrow(
+            "SELECT user_1_id, user_2_id FROM public.meetings WHERE id=$1",
             meeting_id,
+        )
+        if not pair:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        await conn.execute(
+            """
+            UPDATE public.meetings
+            SET status='met', last_updated=now()
+            WHERE ((user_1_id = $1 AND user_2_id = $2) OR (user_1_id = $2 AND user_2_id = $1))
+              AND status = 'new'
+            """,
+            pair["user_1_id"],
+            pair["user_2_id"],
         )
     return {"ok": True}
 
@@ -2527,9 +2787,21 @@ async def tma_decline_meeting(meeting_id: int, tg_user: dict = Depends(_get_tma_
     if not pool:
         raise HTTPException(status_code=503, detail="DB not ready")
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE public.meetings SET status='cancelled', last_updated=now() WHERE id=$1",
+        pair = await conn.fetchrow(
+            "SELECT user_1_id, user_2_id FROM public.meetings WHERE id=$1",
             meeting_id,
+        )
+        if not pair:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        await conn.execute(
+            """
+            UPDATE public.meetings
+            SET status='cancelled', last_updated=now()
+            WHERE ((user_1_id = $1 AND user_2_id = $2) OR (user_1_id = $2 AND user_2_id = $1))
+              AND status = 'new'
+            """,
+            pair["user_1_id"],
+            pair["user_2_id"],
         )
     return {"ok": True}
 
@@ -2539,11 +2811,18 @@ async def tma_already_know(meeting_id: int, tg_user: dict = Depends(_get_tma_use
     if not pool:
         raise HTTPException(status_code=503, detail="DB not ready")
     async with pool.acquire() as conn:
+        pair = await conn.fetchrow(
+            "SELECT user_1_id, user_2_id FROM public.meetings WHERE id=$1",
+            meeting_id,
+        )
+        if not pair:
+            raise HTTPException(status_code=404, detail="Meeting not found")
         await conn.execute(
             """UPDATE public.meetings
                SET status='cancelled', already_known=true, last_updated=now()
-               WHERE id=$1""",
-            meeting_id,
+               WHERE ((user_1_id = $1 AND user_2_id = $2) OR (user_1_id = $2 AND user_2_id = $1))
+                 AND status = 'new'""",
+            pair["user_1_id"],
+            pair["user_2_id"],
         )
     return {"ok": True}
-

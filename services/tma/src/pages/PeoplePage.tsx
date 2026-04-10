@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { api, Member } from '../lib/api'
 import MemberCard from '../components/MemberCard'
 import LoadingScreen from '../components/LoadingScreen'
-import logoHorizontal from '../assets/logo-horizontal.png'
 
 export default function PeoplePage() {
   const [members, setMembers] = useState<Member[]>([])
@@ -46,20 +45,13 @@ export default function PeoplePage() {
 
       {/* Header */}
       <div className="flex-shrink-0 px-4 pt-4 pb-3">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="font-display text-2xl font-light tracking-wide text-cream">
-              Резиденты
-            </h1>
-            <p className="text-muted text-xs font-body mt-0.5">
-              {members.length} участников клуба
-            </p>
-          </div>
-          <img
-            src={logoHorizontal}
-            alt="Baltic Business Club"
-            className="h-10 w-auto select-none opacity-95"
-          />
+        <div className="mb-4">
+          <h1 className="font-display text-2xl font-light tracking-wide text-cream">
+            Резиденты
+          </h1>
+          <p className="text-muted text-xs font-body mt-0.5">
+            {members.length} участников клуба
+          </p>
         </div>
 
         {/* Search */}
