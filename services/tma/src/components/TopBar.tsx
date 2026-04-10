@@ -55,11 +55,13 @@ export default function TopBar() {
           className="flex w-12 flex-shrink-0 justify-end self-start pt-0.5 transition-opacity active:opacity-80 sm:w-14"
           aria-label="Go to home"
         >
-          <img
-            src={logoVertical}
-            alt="Baltic Business Club"
-            className="h-11 w-auto -translate-y-0.5 select-none opacity-95 sm:h-12"
-          />
+          <span className="inline-flex -translate-y-1 items-center justify-center rounded-full border border-gold/70 bg-surface/70 p-1">
+            <img
+              src={logoVertical}
+              alt="Baltic Business Club"
+              className="h-10 w-auto select-none opacity-95 sm:h-11"
+            />
+          </span>
         </button>
       </div>
     </header>
