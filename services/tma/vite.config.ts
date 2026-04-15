@@ -7,6 +7,14 @@ export default defineConfig({
   server: {
     port: 5174,
     host: true,
+    // In dev mode proxy /api/ to the local API container (port 8055)
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8055',
+        rewrite: path => path.replace(/^\/api/, ''),
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: 'dist',

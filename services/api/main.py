@@ -2,7 +2,9 @@ import os
 import asyncpg
 import httpx
 import math
-from fastapi import FastAPI, HTTPException, Depends, Header, Response
+import json
+import time
+from fastapi import FastAPI, HTTPException, Depends, Header, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import date, datetime
@@ -2826,3 +2828,95 @@ async def tma_already_know(meeting_id: int, tg_user: dict = Depends(_get_tma_use
             pair["user_2_id"],
         )
     return {"ok": True}
+
+
+# ── Fienta event enrichment ────────────────────────────────────────────────────
+
+_fienta_cache: dict[str, tuple[float, dict]] = {}
+_FIENTA_TTL = 3600  # 1 hour
+
+
+def _parse_fienta_jsonld(html: str) -> dict:
+    """Extract schema.org Event JSON-LD from a Fienta event page."""
+    blocks = re.findall(
+        r'application/ld\+json[^>]*>(.*?)</script>', html, re.DOTALL
+    )
+    for block in blocks:
+        try:
+            data = json.loads(block.strip())
+            if isinstance(data, list):
+                for item in data:
+                    if item.get("@type") == "Event":
+                        return item
+            elif data.get("@type") == "Event":
+                return data
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    return {}
+
+
+def _normalise_fienta(raw: dict) -> dict:
+    """Return only the fields the TMA needs."""
+    location = raw.get("location") or {}
+    address = location.get("address") or {}
+    geo = location.get("geo") or {}
+
+    offers = raw.get("offers") or []
+    if isinstance(offers, dict):
+        offers = [offers]
+    price = None
+    currency = None
+    if offers:
+        o = offers[0]
+        price = o.get("price")
+        currency = o.get("priceCurrency")
+
+    images = raw.get("image") or []
+    if isinstance(images, str):
+        images = [images]
+    image = images[0] if images else None
+
+    return {
+        "title": raw.get("name"),
+        "description": raw.get("description"),
+        "start_at": raw.get("startDate"),
+        "end_at": raw.get("endDate"),
+        "location_name": location.get("name"),
+        "location_address": ", ".join(filter(None, [
+            address.get("streetAddress"),
+            address.get("addressLocality"),
+        ])),
+        "latitude": geo.get("latitude"),
+        "longitude": geo.get("longitude"),
+        "price": price,
+        "currency": currency,
+        "image": image,
+    }
+
+
+@app.get("/tma/fienta-event")
+async def tma_fienta_event(url: str = Query(...)):
+    """Fetch and cache Fienta event JSON-LD for TMA enrichment."""
+    # Only allow fienta.com URLs
+    if not re.match(r'https?://fienta\.com/', url):
+        raise HTTPException(status_code=400, detail="Only fienta.com URLs allowed")
+
+    now = time.monotonic()
+    if url in _fienta_cache:
+        ts, cached = _fienta_cache[url]
+        if now - ts < _FIENTA_TTL:
+            return cached
+
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"Accept-Language": "ru"})
+        resp.raise_for_status()
+        raw = _parse_fienta_jsonld(resp.text)
+        if not raw:
+            raise HTTPException(status_code=404, detail="No Event JSON-LD found")
+        result = _normalise_fienta(raw)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Fienta fetch failed: {e}")
+
+    _fienta_cache[url] = (now, result)
+    return result
