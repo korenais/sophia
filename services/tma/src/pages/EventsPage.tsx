@@ -40,6 +40,7 @@ interface FientaData {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const EVENTS_API = 'https://balticbusinessclub.com/wp-json/bbc-calendar/v1/miniapp/events'
+const TMA_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
@@ -156,7 +157,7 @@ export default function EventsPage() {
   useEffect(() => {
     for (const ev of selectedEvents) {
       if (!ev.url?.includes('fienta.com') || fientaCache[ev.url]) continue
-      fetch(`/api/tma/fienta-event?url=${encodeURIComponent(ev.url)}`)
+      fetch(`${TMA_API_BASE}/tma/fienta-event?url=${encodeURIComponent(ev.url)}`)
         .then(r => r.ok ? r.json() : null)
         .then(d => d && setFientaCache(prev => ({ ...prev, [ev.url]: d })))
         .catch(() => {})
@@ -441,7 +442,7 @@ function EventDetail({ event, prefetchedFienta, onClose }: {
   useEffect(() => {
     if (!isFienta || prefetchedFienta) return
     setFLoading(true)
-    fetch(`/api/tma/fienta-event?url=${encodeURIComponent(event.url)}`)
+    fetch(`${TMA_API_BASE}/tma/fienta-event?url=${encodeURIComponent(event.url)}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => d && setFienta(d))
       .catch(() => {})
