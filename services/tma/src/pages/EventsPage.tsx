@@ -95,7 +95,7 @@ export default function EventsPage() {
   const [events, setEvents]       = useState<CalendarEvent[]>([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState<string | null>(null)
-  const [view, setView]               = useState<'calendar' | 'list'>('calendar')
+  const [view, setView]               = useState<'calendar' | 'list'>('list')
   const [selectedDay, setSelectedDay] = useState<string>(todayKey)
   const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null)
   // Pre-fetched Fienta data keyed by event URL
@@ -508,13 +508,19 @@ function ListView({ events, loading, error, fientaCache, todayKey, isCurrentMont
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
   }, [events])
 
-  // Scroll to first today-or-future group when viewing current month
+  // Scroll behaviour when month/events change
   useEffect(() => {
-    if (!isCurrentMonth || !scrollRef.current || groups.length === 0) return
-    const firstFutureKey = groups.find(([dateKey]) => dateKey >= todayKey)?.[0]
-    if (!firstFutureKey) return
-    const el = scrollRef.current.querySelector<HTMLElement>(`[data-date="${firstFutureKey}"]`)
-    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    if (!scrollRef.current || groups.length === 0) return
+    if (isCurrentMonth) {
+      // Scroll to first today-or-future event
+      const firstFutureKey = groups.find(([dateKey]) => dateKey >= todayKey)?.[0]
+      if (!firstFutureKey) return
+      const el = scrollRef.current.querySelector<HTMLElement>(`[data-date="${firstFutureKey}"]`)
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    } else {
+      // Reset to top for any other month
+      scrollRef.current.scrollTop = 0
+    }
   }, [isCurrentMonth, groups.length, todayKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return (
@@ -540,23 +546,8 @@ function ListView({ events, loading, error, fientaCache, todayKey, isCurrentMont
   )
 
   return (
+    <>
     <div ref={scrollRef} className="flex-1 scroll-area px-4 pt-2 pb-4">
-      {/* Legend */}
-      <div className="flex items-center gap-4 mb-3">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#5b9fd6' }} />
-          <span className="text-[11px] text-muted font-body">Члены клуба</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#e06060' }} />
-          <span className="text-[11px] text-muted font-body">Открытое</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#3ec47a' }} />
-          <span className="text-[11px] text-muted font-body">Спецмероприятие</span>
-        </div>
-      </div>
-      <div className="gold-divider mb-3" />
       <div className="space-y-4">
         {groups.map(([dateKey, dayEvs]) => {
           const isPast = dateKey < todayKey
@@ -587,6 +578,23 @@ function ListView({ events, loading, error, fientaCache, todayKey, isCurrentMont
         })}
       </div>
     </div>
+
+    {/* Pinned legend */}
+    <div className="flex-shrink-0 flex items-center gap-4 px-4 py-2 border-t border-border/40">
+      <div className="flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#5b9fd6' }} />
+        <span className="text-[11px] text-muted font-body">Члены клуба</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#e06060' }} />
+        <span className="text-[11px] text-muted font-body">Открытое</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#3ec47a' }} />
+        <span className="text-[11px] text-muted font-body">Спецмероприятие</span>
+      </div>
+    </div>
+    </>
   )
 }
 
