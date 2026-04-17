@@ -95,6 +95,7 @@ export default function EventsPage() {
   const [events, setEvents]       = useState<CalendarEvent[]>([])
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState<string | null>(null)
+  const [view, setView]               = useState<'calendar' | 'list'>('calendar')
   const [selectedDay, setSelectedDay] = useState<string>(todayKey)
   const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null)
   // Pre-fetched Fienta data keyed by event URL
@@ -153,16 +154,17 @@ export default function EventsPage() {
 
   const selectedEvents = selectedDay ? (eventsByDay[selectedDay] ?? []) : []
 
-  // Pre-fetch Fienta data for all events in the selected day
+  // Pre-fetch Fienta data: for selected day (calendar) or all month events (list)
   useEffect(() => {
-    for (const ev of selectedEvents) {
+    const targets = view === 'list' ? events : selectedEvents
+    for (const ev of targets) {
       if (!ev.url?.includes('fienta.com') || fientaCache[ev.url]) continue
       fetch(`${TMA_API_BASE}/tma/fienta-event?url=${encodeURIComponent(ev.url)}`)
         .then(r => r.ok ? r.json() : null)
         .then(d => d && setFientaCache(prev => ({ ...prev, [ev.url]: d })))
         .catch(() => {})
     }
-  }, [selectedDay, selectedEvents.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view, selectedDay, selectedEvents.length, events.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedLabel  = selectedDay
     ? new Date(selectedDay + 'T00:00:00').toLocaleDateString('ru-RU', {
@@ -173,10 +175,10 @@ export default function EventsPage() {
   return (
     <div className="flex flex-col h-full bg-bg">
 
-      {/* ── Month navigation ── */}
-      <div className="flex-shrink-0 flex items-center justify-between px-4 pt-3 pb-2">
+      {/* ── Month navigation + view toggle ── */}
+      <div className="flex-shrink-0 flex items-center px-4 pt-3 pb-2 gap-2">
         <button onClick={() => goMonth(-1)}
-          className="w-9 h-9 flex items-center justify-center rounded-full
+          className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full
                      bg-raised border border-border/60 active:scale-95 transition-transform"
           aria-label="Предыдущий месяц">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -185,7 +187,7 @@ export default function EventsPage() {
           </svg>
         </button>
 
-        <div className="text-center leading-none">
+        <div className="flex-1 text-center leading-none">
           <h1 className="font-display text-[20px] font-light tracking-wide text-cream">
             {MONTHS[month]}
           </h1>
@@ -193,7 +195,7 @@ export default function EventsPage() {
         </div>
 
         <button onClick={() => goMonth(1)}
-          className="w-9 h-9 flex items-center justify-center rounded-full
+          className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-full
                      bg-raised border border-border/60 active:scale-95 transition-transform"
           aria-label="Следующий месяц">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -201,7 +203,45 @@ export default function EventsPage() {
                   strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
+
+        {/* View toggle */}
+        <div className="flex-shrink-0 flex items-center bg-raised border border-border/60 rounded-lg overflow-hidden">
+          <button
+            onClick={() => { hapticImpact('light'); setView('calendar') }}
+            className={[
+              'w-8 h-8 flex items-center justify-center transition-colors',
+              view === 'calendar' ? 'bg-gold/20 text-gold' : 'text-muted/50 active:text-muted',
+            ].join(' ')}
+            aria-label="Вид календаря"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M3 9h18" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M8 2v4M16 2v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <rect x="7" y="13" width="3" height="3" rx="0.5" fill="currentColor"/>
+              <rect x="14" y="13" width="3" height="3" rx="0.5" fill="currentColor"/>
+            </svg>
+          </button>
+          <div className="w-px h-4 bg-border/60" />
+          <button
+            onClick={() => { hapticImpact('light'); setView('list') }}
+            className={[
+              'w-8 h-8 flex items-center justify-center transition-colors',
+              view === 'list' ? 'bg-gold/20 text-gold' : 'text-muted/50 active:text-muted',
+            ].join(' ')}
+            aria-label="Вид списка"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M8 6h13M8 12h13M8 18h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <circle cx="4" cy="6" r="1.2" fill="currentColor"/>
+              <circle cx="4" cy="12" r="1.2" fill="currentColor"/>
+              <circle cx="4" cy="18" r="1.2" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {view === 'calendar' && <>
 
       {/* ── Weekday headers ── */}
       <div className="flex-shrink-0 grid grid-cols-7 px-2">
@@ -338,6 +378,22 @@ export default function EventsPage() {
         )}
       </div>
 
+      </>}
+
+      {/* ── List view ── */}
+      {view === 'list' && (
+        <ListView
+          events={events}
+          loading={loading}
+          error={error}
+          fientaCache={fientaCache}
+          todayKey={todayKey}
+          isCurrentMonth={year === today.getFullYear() && month === today.getMonth()}
+          onOpen={ev => { hapticImpact('light'); setDetailEvent(ev) }}
+          onRetry={() => { setLoading(true); fetchEvents(year, month).then(setEvents).catch(e => setError(e.message)).finally(() => setLoading(false)) }}
+        />
+      )}
+
       {/* ── Event detail modal ── */}
       {detailEvent && (
         <EventDetail
@@ -359,7 +415,7 @@ function EventRow({ event, index, fienta, onOpen }: {
   onOpen: () => void
 }) {
   const title    = fienta?.title?.trim() || eventDisplayName(event)
-  const dotBg    = event.color || '#C9A84C'
+  const dotBg    = dotColor(event.color)
   const isFienta = event.url?.includes('fienta.com')
   const thumb    = fienta?.image ?? null
 
@@ -425,6 +481,112 @@ function EventRow({ event, index, fienta, onOpen }: {
         )}
       </div>
     </button>
+  )
+}
+
+// ─── Month list view ──────────────────────────────────────────────────────────
+
+function ListView({ events, loading, error, fientaCache, todayKey, isCurrentMonth, onOpen, onRetry }: {
+  events: CalendarEvent[]
+  loading: boolean
+  error: string | null
+  fientaCache: Record<string, FientaData>
+  todayKey: string
+  isCurrentMonth: boolean
+  onOpen: (ev: CalendarEvent) => void
+  onRetry: () => void
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Group by date, sorted, skip empty days
+  const groups = useMemo(() => {
+    const map: Record<string, CalendarEvent[]> = {}
+    for (const ev of events) {
+      if (!map[ev.date]) map[ev.date] = []
+      map[ev.date].push(ev)
+    }
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
+  }, [events])
+
+  // Scroll to first today-or-future group when viewing current month
+  useEffect(() => {
+    if (!isCurrentMonth || !scrollRef.current || groups.length === 0) return
+    const firstFutureKey = groups.find(([dateKey]) => dateKey >= todayKey)?.[0]
+    if (!firstFutureKey) return
+    const el = scrollRef.current.querySelector<HTMLElement>(`[data-date="${firstFutureKey}"]`)
+    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [isCurrentMonth, groups.length, todayKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="w-5 h-5 rounded-full border-2 border-gold/30 border-t-gold animate-spin" />
+    </div>
+  )
+
+  if (error) return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3">
+      <p className="text-danger text-sm font-body">{error}</p>
+      <button onClick={onRetry} className="text-gold text-sm font-body underline underline-offset-2">
+        Попробовать снова
+      </button>
+    </div>
+  )
+
+  if (groups.length === 0) return (
+    <div className="flex-1 flex flex-col items-center justify-center animate-fade-in">
+      <div className="text-gold/20 text-4xl mb-2">◈</div>
+      <p className="text-muted text-sm font-body">Нет событий в этом месяце</p>
+    </div>
+  )
+
+  return (
+    <div ref={scrollRef} className="flex-1 scroll-area px-4 pt-2 pb-4">
+      {/* Legend */}
+      <div className="flex items-center gap-4 mb-3">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#5b9fd6' }} />
+          <span className="text-[11px] text-muted font-body">Члены клуба</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#e06060' }} />
+          <span className="text-[11px] text-muted font-body">Открытое</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#3ec47a' }} />
+          <span className="text-[11px] text-muted font-body">Спецмероприятие</span>
+        </div>
+      </div>
+      <div className="gold-divider mb-3" />
+      <div className="space-y-4">
+        {groups.map(([dateKey, dayEvs]) => {
+          const isPast = dateKey < todayKey
+          const label  = new Date(dateKey + 'T00:00:00').toLocaleDateString('ru-RU', {
+            weekday: 'long', day: 'numeric', month: 'long',
+          })
+          return (
+            <div key={dateKey} data-date={dateKey} className={isPast ? 'opacity-50' : ''}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] text-gold/60 font-body tracking-[2px] uppercase capitalize">
+                  {label}
+                </span>
+                <div className="flex-1 h-px bg-border/50" />
+              </div>
+              <div className="space-y-2">
+                {dayEvs.map((ev, i) => (
+                  <EventRow
+                    key={ev.id}
+                    event={ev}
+                    index={i}
+                    fienta={ev.url ? fientaCache[ev.url] ?? null : null}
+                    onOpen={() => onOpen(ev)}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
